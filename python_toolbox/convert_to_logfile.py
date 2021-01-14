@@ -32,7 +32,7 @@
 # ----------------------------------------------------------------------------
 #
 # Python script to convert SfM data into the tanksandtempls log file format
-# Example: 
+# Example:
 # python convert_to_logfile.py [COLMAP SfM file] \
 #   						   [output log-filename] \
 #				               [folder of the input images] \
@@ -45,8 +45,8 @@ import os
 import glob
 import numpy as np
 from numpy import matrix
-import read_model
-                 
+import read_write_model
+
 def write_SfM_log(T, i_map, filename):
     with open(filename, 'w') as f:
         ii=0
@@ -78,7 +78,7 @@ def quat2rotmat(qvec):
 # Example: convert_COLMAP_to_log('sparse/0/', 'colmap.log', 'images/','jpg')
 def convert_COLMAP_to_log(filename, logfile_out, input_images, formatp):
 	dirname = os.path.dirname(filename)
-	cameras, images, points3D = read_model.read_model(dirname,'.bin')
+	cameras, images, points3D = read_write_model.read_model(dirname,'.bin')
 	jpg_list = glob.glob(input_images+'/*.'+formatp)
 	jpg_list.sort()
 	nr_of_images = len(jpg_list)
@@ -96,25 +96,25 @@ def convert_COLMAP_to_log(filename, logfile_out, input_images, formatp):
 		w = np.zeros((4,4))
 		w[3,3] = 1
 		w[0:3,0:3]=r
-		w[0:3,3]=translation 
+		w[0:3,3]=translation
 		A = matrix(w)
 		T.append(A.I)
 		image_name = im[4]
 		matching = [i for i,s in enumerate(jpg_list) if image_name in s]
 		ii=im[0]
-		i_map.append([ii,matching[0],0])	
+		i_map.append([ii,matching[0],0])
 	idm = np.identity(4)
-	# log file needs an entry for every input image, if image is not part of 
+	# log file needs an entry for every input image, if image is not part of
 	# the SfM bundle it will be assigned to the identity matrix
 	for k in range(0,nr_of_images):
 		try:
 			# find the id of view nr. k
-			view_id = [i for i, item in enumerate(i_map) if k==item[1]][0] 
-			i_mapF.append(np.array([k,k,0.0],dtype='int'))	
+			view_id = [i for i, item in enumerate(i_map) if k==item[1]][0]
+			i_mapF.append(np.array([k,k,0.0],dtype='int'))
 			TF.append(T[view_id])
 		except:
-			i_mapF.append(np.array([k,-1,0.0],dtype='int'))	
-			TF.append(idm)		
+			i_mapF.append(np.array([k,-1,0.0],dtype='int'))
+			TF.append(idm)
 	write_SfM_log(TF, i_mapF, logfile_out)
 
 # USAGE: convert_MVE_to_log([MVE SfM file] [output log-filename] \
@@ -141,7 +141,7 @@ def convert_MVE_to_log(filename, logfile_out, views_folder):
 		matching_i = [i for i,s in enumerate(lines_m) if 'name = ' in s]
 		orig_img = lines_m[matching_i[0]].split('= ')[1]
 		image_list.append(orig_img)
-	image_list.sort()	
+	image_list.sort()
 
 	for x in range(0, nr_of_views):
 		meta_filename = views_list[x]+'meta.ini'
@@ -149,31 +149,31 @@ def convert_MVE_to_log(filename, logfile_out, views_folder):
 		matching_r = [i for i,s in enumerate(lines_m) if 'rotation' in s]
 		if(len(matching_r)):
 			r_line = lines_m[matching_r[0]].split('= ')[1]
-			r = np.array(r_line.split(' '),dtype='double').reshape(3,3)	
+			r = np.array(r_line.split(' '),dtype='double').reshape(3,3)
 			matching_t = [i for i,s in enumerate(lines_m) if 'translation' in s]
 			t_line = lines_m[matching_t[0]].split('= ')[1]
 			translation = np.array(t_line.split(' ')[0:3],dtype='double')
 			w = np.zeros((4,4))
 			w[3,3] = 1
 			w[0:3,0:3]=r
-			w[0:3,3]=translation 
+			w[0:3,3]=translation
 			A = matrix(w)
 			T.append(A.I)
 			matching_i = [i for i,s in enumerate(lines_m) if 'name = ' in s]
 			orig_img = lines_m[matching_i[0]].split('= ')[1]
 			matching_io = [i for i,s in enumerate(image_list) if orig_img in s]
-			i_map.append([x,matching_io[0],0])	
+			i_map.append([x,matching_io[0],0])
 	idm = np.identity(4)
-	# log file needs an entry for every input image, if image is not part of 
+	# log file needs an entry for every input image, if image is not part of
 	# the SfM bundle it will be assigned to the identity matrix
 	for k in range(0,nr_of_images):
 		try:
 			# find the bundler id of view nr. k
-			view_id = [i for i, item in enumerate(i_map) if k==item[1]][0] 
-			i_mapF.append(np.array([k,k,0.0],dtype='int'))	
+			view_id = [i for i, item in enumerate(i_map) if k==item[1]][0]
+			i_mapF.append(np.array([k,k,0.0],dtype='int'))
 			TF.append(T[view_id])
 		except:
-			i_mapF.append(np.array([k,-1,0.0],dtype='int'))	
+			i_mapF.append(np.array([k,-1,0.0],dtype='int'))
 			TF.append(idm)
 	write_SfM_log(TF, i_mapF, logfile_out)
 
@@ -202,41 +202,41 @@ def convert_VSFM_to_log(filename, logfile_out, input_images, formatp):
 		r = quat2rotmat(qvec)
 		t1x = np.array([float(line_split[5]), float(line_split[6]), \
 						float(line_split[7])])
-		r = r*np.array([[1],[-1],[-1]]) # no idea why this is necessary 
+		r = r*np.array([[1],[-1],[-1]]) # no idea why this is necessary
 		translation = np.dot(-r,t1x)
 		w = np.zeros((4,4))
 		w[3,3] = 1
 		w[0:3,0:3]=r
-		w[0:3,3]=translation 
+		w[0:3,3]=translation
 		A = matrix(w)
 		T.append(A.I)
 		image_name = line_split[0].split('\t')[0]
 		matching = [i for i,s in enumerate(jpg_list) if image_name in s]
 		ii = x-3
-		i_map.append([ii,matching[0],0])	
+		i_map.append([ii,matching[0],0])
 	idm = np.identity(4)
-	
-	# log file needs an entry for every input image, if image is not part of 
+
+	# log file needs an entry for every input image, if image is not part of
 	# the SfM bundle it will be assigned to the identity matrix
 	for k in range(0,nr_of_images):
 		try:
 			# find the bundler id of view nr. k
-			view_id = [i for i, item in enumerate(i_map) if k==item[1]][0] 
-			i_mapF.append(np.array([k,view_id,0.0],dtype='int'))	
+			view_id = [i for i, item in enumerate(i_map) if k==item[1]][0]
+			i_mapF.append(np.array([k,view_id,0.0],dtype='int'))
 			TF.append(T[view_id])
 		except:
-			i_mapF.append(np.array([k,-1,0.0],dtype='int'))	
+			i_mapF.append(np.array([k,-1,0.0],dtype='int'))
 			TF.append(idm)
-	write_SfM_log(TF, i_mapF, logfile_out)	
-	
-		
+	write_SfM_log(TF, i_mapF, logfile_out)
+
+
 if __name__ == '__main__':
-    
-	filename = sys.argv[1] 
-	logfile_out = sys.argv[2] 
-	input_images = sys.argv[3] 
-	method = sys.argv[4] 
-	formatp = sys.argv[5] 
+
+	filename = sys.argv[1]
+	logfile_out = sys.argv[2]
+	input_images = sys.argv[3]
+	method = sys.argv[4]
+	formatp = sys.argv[5]
 
 	if method=='COLMAP':
 		convert_COLMAP_to_log(filename, logfile_out, input_images, formatp)
@@ -244,4 +244,4 @@ if __name__ == '__main__':
 		convert_MVE_to_log(filename, logfile_out, input_images)
 	if method=='VSFM':
 		convert_VSFM_to_log(filename, logfile_out, input_images, formatp)
-		
+

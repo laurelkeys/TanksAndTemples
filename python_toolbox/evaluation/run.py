@@ -53,8 +53,7 @@ from registration import (
 
 
 def run_evaluation(
-    dataset_dir, traj_path, ply_path, out_dir,
-    _ref_logfile_postfix="", _alignment_postfix=""
+    dataset_dir, traj_path, ply_path, out_dir, _ref_logfile_postfix="", _alignment_postfix=""
 ):
     scene = os.path.basename(os.path.normpath(dataset_dir))
 
@@ -100,12 +99,8 @@ def run_evaluation(
     dist_threshold = dTau
 
     # Registration refinment in 3 iterations
-    r2 = registration_vol_ds(
-        pcd, gt_pcd, trajectory_transform, vol, dTau, dTau * 80, 20
-    )
-    r3 = registration_vol_ds(
-        pcd, gt_pcd, r2.transformation, vol, dTau / 2.0, dTau * 20, 20
-    )
+    r2 = registration_vol_ds(pcd, gt_pcd, trajectory_transform, vol, dTau, dTau * 80, 20)
+    r3 = registration_vol_ds(pcd, gt_pcd, r2.transformation, vol, dTau / 2.0, dTau * 20, 20)
     r = registration_unif(pcd, gt_pcd, r3.transformation, vol, 2 * dTau, 20)
 
     # Histogramms and P/R/F1
@@ -156,19 +151,27 @@ def run_evaluation(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset-dir", type=str, required=True,
+        "--dataset-dir",
+        type=str,
+        required=True,
         help="path to a dataset/scene directory containing X.json, X.ply, ...",
     )
     parser.add_argument(
-        "--traj-path", type=str, required=True,
+        "--traj-path",
+        type=str,
+        required=True,
         help="path to trajectory file (see `convert_to_logfile.py` to create this file)",
     )
     parser.add_argument(
-        "--ply-path", type=str, required=True,
+        "--ply-path",
+        type=str,
+        required=True,
         help="path to reconstruction ply file",
     )
     parser.add_argument(
-        "--out-dir", type=str, default="",
+        "--out-dir",
+        type=str,
+        default="",
         help="output directory (default: an evaluation directory is created in the directory of the ply file)",
     )
     args = parser.parse_args()
@@ -182,5 +185,5 @@ if __name__ == "__main__":
         ply_path=args.ply_path,
         out_dir=args.out_dir,
         _ref_logfile_postfix="_COLMAP_SfM",
-        _alignment_postfix="_trans"
+        _alignment_postfix="_trans",
     )

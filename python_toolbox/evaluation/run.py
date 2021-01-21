@@ -33,26 +33,29 @@
 # The dataset has a different license, please refer to
 # https://tanksandtemples.org/license/
 
+import os
+import argparse
+
 # this script requires Open3D python binding
 # please follow the intructions in setup.py before running this script.
 import numpy as np
 import open3d as o3d
-import os
-import argparse
 
+from plot import plot_graph
 from config import scenes_tau_dict
+from evaluation import EvaluateHisto
 from registration import (
     trajectory_alignment,
     registration_vol_ds,
     registration_unif,
     read_trajectory,
 )
-from evaluation import EvaluateHisto
-from util import make_dir
-from plot import plot_graph
 
 
-def run_evaluation(dataset_dir, traj_path, ply_path, out_dir):
+def run_evaluation(
+    dataset_dir, traj_path, ply_path, out_dir,
+    _ref_logfile_postfix="", _alignment_postfix=""
+):
     scene = os.path.basename(os.path.normpath(dataset_dir))
 
     if scene not in scenes_tau_dict:
@@ -68,13 +71,14 @@ def run_evaluation(dataset_dir, traj_path, ply_path, out_dir):
     # put the crop-file, the GT file, the COLMAP SfM log file and
     # the alignment of the according scene in a folder of
     # the same scene name in the dataset_dir
-    colmap_ref_logfile = os.path.join(dataset_dir, scene + "_COLMAP_SfM.log")
-    alignment = os.path.join(dataset_dir, scene + "_trans.txt")
-    gt_filen = os.path.join(dataset_dir, scene + ".ply")
-    cropfile = os.path.join(dataset_dir, scene + ".json")
-    map_file = os.path.join(dataset_dir, scene + "_mapping_reference.txt")
+    colmap_ref_logfile = os.path.join(dataset_dir, f"{scene}{_ref_logfile_postfix}.log")
+    alignment = os.path.join(dataset_dir, f"{scene}{_alignment_postfix}.txt")
+    gt_filen = os.path.join(dataset_dir, f"{scene}.ply")
+    cropfile = os.path.join(dataset_dir, f"{scene}.json")
+    map_file = os.path.join(dataset_dir, f"{scene}_mapping_reference.txt")
 
-    make_dir(out_dir)
+    if not os.path.exists(out_dir):
+        os.makedirs(out_dir)
 
     # Load reconstruction and according GT
     print(ply_path)
@@ -152,39 +156,31 @@ def run_evaluation(dataset_dir, traj_path, ply_path, out_dir):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset-dir",
-        type=str,
-        required=True,
+        "--dataset-dir", type=str, required=True,
         help="path to a dataset/scene directory containing X.json, X.ply, ...",
     )
     parser.add_argument(
-        "--traj-path",
-        type=str,
-        required=True,
-        help="path to trajectory file. See `convert_to_logfile.py` to create this file.",
+        "--traj-path", type=str, required=True,
+        help="path to trajectory file (see `convert_to_logfile.py` to create this file)",
     )
     parser.add_argument(
-        "--ply-path",
-        type=str,
-        required=True,
+        "--ply-path", type=str, required=True,
         help="path to reconstruction ply file",
     )
     parser.add_argument(
-        "--out-dir",
-        type=str,
-        default="",
-        help="output directory, default: an evaluation directory is created in the directory of the ply file",
+        "--out-dir", type=str, default="",
+        help="output directory (default: an evaluation directory is created in the directory of the ply file)",
     )
     args = parser.parse_args()
 
     if args.out_dir.strip() == "":
-        args.out_dir = os.path.join(
-            os.path.dirname(args.ply_path), "evaluation"
-        )
+        args.out_dir = os.path.join(os.path.dirname(args.ply_path), "evaluation")
 
     run_evaluation(
         dataset_dir=args.dataset_dir,
         traj_path=args.traj_path,
         ply_path=args.ply_path,
         out_dir=args.out_dir,
+        _ref_logfile_postfix="_COLMAP_SfM",
+        _alignment_postfix="_trans"
     )

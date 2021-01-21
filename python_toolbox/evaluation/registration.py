@@ -33,10 +33,12 @@
 # The dataset has a different license, please refer to
 # https://tanksandtemples.org/license/
 
-from trajectory_io import read_trajectory, convert_trajectory_to_pointcloud
 import copy
+
 import numpy as np
 import open3d as o3d
+
+from trajectory_io import convert_trajectory_to_pointcloud
 
 MAX_POINT_NUMBER = 4e6
 

@@ -33,9 +33,9 @@
 # The dataset has a different license, please refer to
 # https://tanksandtemples.org/license/
 
-import json
 import copy
-import os
+import json
+
 import numpy as np
 import open3d as o3d
 import matplotlib.pyplot as plt

@@ -8,14 +8,9 @@ class CameraPose:
         self.pose = mat
 
     def __str__(self):
-        return (
-            "Metadata : "
-            + " ".join(map(str, self.metadata))
-            + "\n"
-            + "Pose : "
-            + "\n"
-            + np.array_str(self.pose)
-        )
+        metadata_str = " ".join(map(str, self.metadata))
+        pose_str = np.array_str(self.pose)
+        return f"Metadata : {metadata_str}\nPose : \n{pose_str}"
 
 
 def convert_trajectory_to_pointcloud(traj):

@@ -68,19 +68,17 @@ def gen_sparse_trajectory(mapping, f_trajectory):
 def trajectory_alignment(map_file, traj_to_register, gt_traj_col, gt_trans):
     traj_pcd_col = convert_trajectory_to_pointcloud(gt_traj_col)
     traj_pcd_col.transform(gt_trans)
-    corres = o3d.utility.Vector2iVector(
-        np.asarray(list(map(lambda x: [x, x], range(len(gt_traj_col)))))
-    )
+    corres = o3d.utility.Vector2iVector(np.asarray([[x, x] for x in range(len(gt_traj_col))]))
     rr = o3d.registration.RANSACConvergenceCriteria()
     rr.max_iteration = 100000
     rr.max_validation = 100000
 
-    # in this case a log file was used which contains
-    # every movie frame (see tutorial for details)
     if len(traj_to_register) > 1600:
+        # in this case a log file was used which contains
+        # every movie frame (see tutorial for details)
         if map_file is None:
             assert gt_traj_col.endswith("_COLMAP_SfM.log")
-            map_file = gt_traj_col[:-len("_COLMAP_SfM.log")] + "_mapping_reference.txt"
+            map_file = gt_traj_col[: -len("_COLMAP_SfM.log")] + "_mapping_reference.txt"
         n_sampled_frames, n_total_frames, mapping = read_mapping(map_file)
         traj_col2 = gen_sparse_trajectory(mapping, traj_to_register)
         traj_to_register_pcd = convert_trajectory_to_pointcloud(traj_col2)

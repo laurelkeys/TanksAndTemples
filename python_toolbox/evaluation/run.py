@@ -44,20 +44,14 @@ import open3d as o3d
 from plot import plot_graph
 from config import scenes_tau_dict
 from evaluation import EvaluateHisto
-from registration import (
-    trajectory_alignment,
-    registration_vol_ds,
-    registration_unif,
-    read_trajectory,
-)
+from registration import registration_unif, registration_vol_ds, trajectory_alignment
+from trajectory_io import read_trajectory
 
 
-def run_evaluation(
-    dataset_dir, traj_path, ply_path, out_dir, _ref_logfile_postfix="", _alignment_postfix=""
-):
+def run_evaluation(dataset_dir, traj_path, ply_path, out_dir, scene_tau=None):
     scene = os.path.basename(os.path.normpath(dataset_dir))
 
-    if scene not in scenes_tau_dict:
+    if scene_tau is None and scene not in scenes_tau_dict:
         print(dataset_dir, scene)
         raise Exception("invalid dataset-dir, not in scenes_tau_dict")
 
@@ -66,15 +60,15 @@ def run_evaluation(
     print("Evaluating %s" % scene)
     print("===========================")
 
-    dTau = scenes_tau_dict[scene]
+    dTau = scene_tau if scene_tau is not None else scenes_tau_dict[scene]
     # put the crop-file, the GT file, the COLMAP SfM log file and
     # the alignment of the according scene in a folder of
     # the same scene name in the dataset_dir
-    colmap_ref_logfile = os.path.join(dataset_dir, f"{scene}{_ref_logfile_postfix}.log")
-    alignment = os.path.join(dataset_dir, f"{scene}{_alignment_postfix}.txt")
-    gt_filen = os.path.join(dataset_dir, f"{scene}.ply")
-    cropfile = os.path.join(dataset_dir, f"{scene}.json")
-    map_file = os.path.join(dataset_dir, f"{scene}_mapping_reference.txt")
+    colmap_ref_logfile = os.path.join(dataset_dir, scene + "_COLMAP_SfM.log")
+    alignment = os.path.join(dataset_dir, scene + "_trans.txt")
+    gt_filen = os.path.join(dataset_dir, scene + ".ply")
+    cropfile = os.path.join(dataset_dir, scene + ".json")
+    map_file = os.path.join(dataset_dir, scene + "_mapping_reference.txt")
 
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
@@ -184,6 +178,4 @@ if __name__ == "__main__":
         traj_path=args.traj_path,
         ply_path=args.ply_path,
         out_dir=args.out_dir,
-        _ref_logfile_postfix="_COLMAP_SfM",
-        _alignment_postfix="_trans",
     )

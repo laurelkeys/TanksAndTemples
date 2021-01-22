@@ -33,6 +33,7 @@
 # The dataset has a different license, please refer to
 # https://tanksandtemples.org/license/
 
+import os
 import copy
 
 import numpy as np
@@ -64,7 +65,7 @@ def gen_sparse_trajectory(mapping, f_trajectory):
     return sparse_traj
 
 
-def trajectory_alignment(map_file, traj_to_register, gt_traj_col, gt_trans, scene):
+def trajectory_alignment(map_file, traj_to_register, gt_traj_col, gt_trans):
     traj_pcd_col = convert_trajectory_to_pointcloud(gt_traj_col)
     traj_pcd_col.transform(gt_trans)
     corres = o3d.utility.Vector2iVector(
@@ -77,6 +78,9 @@ def trajectory_alignment(map_file, traj_to_register, gt_traj_col, gt_trans, scen
     # in this case a log file was used which contains
     # every movie frame (see tutorial for details)
     if len(traj_to_register) > 1600:
+        if map_file is None:
+            assert gt_traj_col.endswith("_COLMAP_SfM.log")
+            map_file = gt_traj_col[:-len("_COLMAP_SfM.log")] + "_mapping_reference.txt"
         n_sampled_frames, n_total_frames, mapping = read_mapping(map_file)
         traj_col2 = gen_sparse_trajectory(mapping, traj_to_register)
         traj_to_register_pcd = convert_trajectory_to_pointcloud(traj_col2)

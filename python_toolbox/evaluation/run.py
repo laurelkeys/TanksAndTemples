@@ -48,10 +48,80 @@ from registration import registration_unif, registration_vol_ds, trajectory_alig
 from trajectory_io import read_trajectory
 
 
-def run_evaluation(dataset_dir, traj_path, ply_path, out_dir, scene_tau=None):
+def evaluate(
+    scene_name,
+    out_dir,
+    dTau,
+    gt_ply_path,  # Ground-truth (gt)
+    gt_log_path,
+    est_ply_path,  # Estimate (est) reconstruction
+    est_log_path,
+    alignment_txt_path,  # Transformation matrix to align 'est' with 'gt'
+    crop_json_path,  # Area cropping for the 'gt' point cloud
+    plot_stretch,
+    map_file=None,
+):
+    # Load reconstruction and according ground-truth
+    est_pcd = o3d.io.read_point_cloud(est_ply_path)  # "source"
+    gt_pcd = o3d.io.read_point_cloud(gt_ply_path)  # "target"
+
+    transform = np.loadtxt(alignment_txt_path)  # ('gt_trans')
+    est_traj = read_trajectory(est_log_path)  # ('traj_to_register')
+    gt_traj = read_trajectory(gt_log_path)  # ('gt_traj_col')
+
+    traj_transformation = trajectory_alignment(map_file, est_traj, gt_traj, transform)
+
+    # Refine alignment by using the actual 'gt' and 'est' point clouds
+    # Big pointclouds will be downsampled to 'dTau' to speed up alignment
+    vol = o3d.visualization.read_selection_polygon_volume(crop_json_path)
+
+    # Registration refinment in 3 iterations
+    r2 = registration_vol_ds(
+        est_pcd,
+        gt_pcd,
+        init_trans=traj_transformation,
+        crop_volume=vol,
+        voxel_size=dTau,
+        threshold=dTau * 80,
+        max_itr=20,
+    )
+    r3 = registration_vol_ds(
+        est_pcd,
+        gt_pcd,
+        init_trans=r2.transformation,
+        crop_volume=vol,
+        voxel_size=dTau / 2,
+        threshold=dTau * 20,
+        max_itr=20,
+    )
+    r = registration_unif(
+        est_pcd,
+        gt_pcd,
+        init_trans=r3.transformation,
+        crop_volume=vol,
+        threshold=2 * dTau,
+        max_itr=20,
+    )
+
+    # Generate histograms and compute P/R/F1
+    # [precision, recall, fscore, edges_source, cum_source, edges_target, cum_target]
+    return EvaluateHisto(
+        est_pcd,
+        gt_pcd,
+        trans=r.transformation,
+        crop_volume=vol,
+        voxel_size=dTau / 2,
+        threshold=dTau,
+        filename_mvs=out_dir,
+        plot_stretch=plot_stretch,
+        scene_name=scene_name,
+    )
+
+
+def run_evaluation(dataset_dir, traj_path, ply_path, out_dir, scene_dTau=None):
     scene = os.path.basename(os.path.normpath(dataset_dir))
 
-    if scene_tau is None and scene not in scenes_tau_dict:
+    if scene_dTau is None and scene not in scenes_tau_dict:
         print(dataset_dir, scene)
         raise Exception("invalid dataset-dir, not in scenes_tau_dict")
 
@@ -60,7 +130,7 @@ def run_evaluation(dataset_dir, traj_path, ply_path, out_dir, scene_tau=None):
     print("Evaluating %s" % scene)
     print("===========================")
 
-    dTau = scene_tau if scene_tau is not None else scenes_tau_dict[scene]
+    dTau = scene_dTau if scene_dTau is not None else scenes_tau_dict[scene]
     # put the crop-file, the GT file, the COLMAP SfM log file and
     # the alignment of the according scene in a folder of
     # the same scene name in the dataset_dir
@@ -73,66 +143,37 @@ def run_evaluation(dataset_dir, traj_path, ply_path, out_dir, scene_tau=None):
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
 
-    # Load reconstruction and according GT
     print(ply_path)
-    pcd = o3d.io.read_point_cloud(ply_path)
     print(gt_filen)
-    gt_pcd = o3d.io.read_point_cloud(gt_filen)
-
-    gt_trans = np.loadtxt(alignment)
-    traj_to_register = read_trajectory(traj_path)
-    gt_traj_col = read_trajectory(colmap_ref_logfile)
-
-    trajectory_transform = trajectory_alignment(
-        map_file, traj_to_register, gt_traj_col, gt_trans, scene
-    )
-
-    # Refine alignment by using the actual GT and MVS pointclouds
-    vol = o3d.visualization.read_selection_polygon_volume(cropfile)
-    # big pointclouds will be downlsampled to this number to speed up alignment
-    dist_threshold = dTau
-
-    # Registration refinment in 3 iterations
-    r2 = registration_vol_ds(pcd, gt_pcd, trajectory_transform, vol, dTau, dTau * 80, 20)
-    r3 = registration_vol_ds(pcd, gt_pcd, r2.transformation, vol, dTau / 2.0, dTau * 20, 20)
-    r = registration_unif(pcd, gt_pcd, r3.transformation, vol, 2 * dTau, 20)
-
-    # Histogramms and P/R/F1
     plot_stretch = 5
-    [
-        precision,
-        recall,
-        fscore,
-        edges_source,
-        cum_source,
-        edges_target,
-        cum_target,
-    ] = EvaluateHisto(
-        pcd,
-        gt_pcd,
-        r.transformation,
-        vol,
-        dTau / 2.0,
-        dTau,
-        out_dir,
-        plot_stretch,
+
+    [precision, recall, fscore, edges_source, cum_source, edges_target, cum_target] = evaluate(
         scene,
+        out_dir,
+        dTau,
+        gt_ply_path=gt_filen,
+        gt_log_path=colmap_ref_logfile,
+        est_ply_path=ply_path,
+        est_log_path=traj_path,
+        alignment_txt_path=alignment,
+        crop_json_path=cropfile,
+        plot_stretch=plot_stretch,
+        map_file=map_file,
     )
-    eva = [precision, recall, fscore]
+
     print("==============================")
     print("evaluation result : %s" % scene)
     print("==============================")
     print("distance tau : %.3f" % dTau)
-    print("precision : %.4f" % eva[0])
-    print("recall : %.4f" % eva[1])
-    print("f-score : %.4f" % eva[2])
+    print("precision : %.4f" % precision)
+    print("recall : %.4f" % recall)
+    print("f-score : %.4f" % fscore)
     print("==============================")
 
-    # Plotting
     plot_graph(
         scene,
         fscore,
-        dist_threshold,
+        dTau,
         edges_source,
         cum_source,
         edges_target,

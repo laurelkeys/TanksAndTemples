@@ -41,6 +41,11 @@ import open3d as o3d
 
 from trajectory_io import convert_trajectory_to_pointcloud
 
+try:
+    o3d_registration = o3d.registration
+except AttributeError:
+    o3d_registration = o3d.pipelines.registration
+
 MAX_POINT_NUMBER = 4e6
 
 
@@ -68,10 +73,17 @@ def gen_sparse_trajectory(mapping, f_trajectory):
 def trajectory_alignment(map_file, traj_to_register, gt_traj_col, gt_trans):
     traj_pcd_col = convert_trajectory_to_pointcloud(gt_traj_col)
     traj_pcd_col.transform(gt_trans)
-    corres = o3d.utility.Vector2iVector(np.asarray([[x, x] for x in range(len(gt_traj_col))]))
-    rr = o3d.registration.RANSACConvergenceCriteria()
+
+    correspondence = o3d.utility.Vector2iVector(
+        np.asarray([[x, x] for x in range(len(gt_traj_col))])
+    )
+
+    rr = o3d_registration.RANSACConvergenceCriteria()
     rr.max_iteration = 100000
-    rr.max_validation = 100000
+    try:
+        rr.max_validation = 100000  # open3d <0.12
+    except AttributeError:
+        rr.confidence = 0.999
 
     if len(traj_to_register) > 1600:
         # in this case a log file was used which contains
@@ -84,25 +96,26 @@ def trajectory_alignment(map_file, traj_to_register, gt_traj_col, gt_trans):
         traj_to_register_pcd = convert_trajectory_to_pointcloud(traj_col2)
     else:
         traj_to_register_pcd = convert_trajectory_to_pointcloud(traj_to_register)
+
     randomvar = 0.0
     nr_of_cam_pos = len(traj_to_register_pcd.points)
     rand_number_added = np.asanyarray(traj_to_register_pcd.points) * (
         np.random.rand(nr_of_cam_pos, 3) * randomvar - randomvar / 2.0 + 1
     )
-    list_rand = list(rand_number_added)
+
     traj_to_register_pcd_rand = o3d.geometry.PointCloud()
-    for elem in list_rand:
+    for elem in list(rand_number_added):
         traj_to_register_pcd_rand.points.append(elem)
 
     # Rough registration based on aligned colmap SfM data
-    reg = o3d.registration.registration_ransac_based_on_correspondence(
-        traj_to_register_pcd_rand,
-        traj_pcd_col,
-        corres,
-        0.2,
-        o3d.registration.TransformationEstimationPointToPoint(True),
-        6,
-        rr,
+    reg = o3d_registration.registration_ransac_based_on_correspondence(
+        source=traj_to_register_pcd_rand,
+        target=traj_pcd_col,
+        corres=correspondence,
+        max_correspondence_distance=0.2,
+        estimation_method=o3d_registration.TransformationEstimationPointToPoint(with_scaling=True),
+        ransac_n=6,
+        criteria=rr,
     )
     return reg.transformation
 
@@ -141,15 +154,25 @@ def registration_unif(
     if verbose:
         print("[Registration] threshold: %f" % threshold)
         o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
-    s = crop_and_downsample(source, crop_volume, down_sample_method="uniform", trans=init_trans)
-    t = crop_and_downsample(gt_target, crop_volume, down_sample_method="uniform")
-    reg = o3d.registration.registration_icp(
+    s = crop_and_downsample(
+        source,
+        crop_volume,
+        down_sample_method="uniform",
+        trans=init_trans,
+    )
+    t = crop_and_downsample(
+        gt_target,
+        crop_volume,
+        down_sample_method="uniform",
+        trans=np.identity(4),
+    )
+    reg = o3d_registration.registration_icp(
         s,
         t,
-        threshold,
-        np.identity(4),
-        o3d.registration.TransformationEstimationPointToPoint(True),
-        o3d.registration.ICPConvergenceCriteria(1e-6, max_itr),
+        max_correspondence_distance=threshold,
+        init=np.identity(4),
+        estimation_method=o3d_registration.TransformationEstimationPointToPoint(with_scaling=True),
+        criteria=o3d_registration.ICPConvergenceCriteria(1e-6, max_itr),
     )
     reg.transformation = np.matmul(reg.transformation, init_trans)
     return reg
@@ -180,14 +203,15 @@ def registration_vol_ds(
         crop_volume,
         down_sample_method="voxel",
         voxel_size=voxel_size,
+        trans=np.identity(4),
     )
-    reg = o3d.registration.registration_icp(
+    reg = o3d_registration.registration_icp(
         s,
         t,
-        threshold,
-        np.identity(4),
-        o3d.registration.TransformationEstimationPointToPoint(True),
-        o3d.registration.ICPConvergenceCriteria(1e-6, max_itr),
+        max_correspondence_distance=threshold,
+        init=np.identity(4),
+        estimation_method=o3d_registration.TransformationEstimationPointToPoint(with_scaling=True),
+        criteria=o3d_registration.ICPConvergenceCriteria(1e-6, max_itr),
     )
     reg.transformation = np.matmul(reg.transformation, init_trans)
     return reg

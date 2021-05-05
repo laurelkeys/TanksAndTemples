@@ -44,7 +44,12 @@ import open3d as o3d
 import matplotlib.pyplot as plt
 
 
-assert o3d.__version__.startswith("0.9") or o3d.__version__.startswith("0.10")
+try:
+    o3d_registration = o3d.registration
+    assert int(o3d.__version__.split(".")[1]) <= 10
+except AttributeError:
+    o3d_registration = o3d.pipelines.registration
+    assert int(o3d.__version__.split(".")[1]) > 10 or int(o3d.__version__.split(".")[0]) > 0
 
 
 # ----------------------------------------------------------------------------
@@ -130,13 +135,13 @@ def uniform_registration(
     s = uniform_downsample(crop_pcd(source, crop_volume, init_trans), max_points)
     t = uniform_downsample(crop_pcd(target, crop_volume), max_points)
 
-    reg = o3d.registration.registration_icp(
+    reg = o3d_registration.registration_icp(
         s,
         t,
         threshold,
         np.identity(4),
-        o3d.registration.TransformationEstimationPointToPoint(True),  # with_scaling
-        o3d.registration.ICPConvergenceCriteria(1e-6, max_iter),
+        o3d_registration.TransformationEstimationPointToPoint(True),  # with_scaling
+        o3d_registration.ICPConvergenceCriteria(1e-6, max_iter),
     )
 
     reg.transformation = np.matmul(reg.transformation, init_trans)
@@ -153,13 +158,13 @@ def voxel_registration(
     s = voxel_downsample(crop_pcd(source, crop_volume, init_trans), voxel_size)
     t = voxel_downsample(crop_pcd(target, crop_volume), voxel_size)
 
-    reg = o3d.registration.registration_icp(
+    reg = o3d_registration.registration_icp(
         s,
         t,
         threshold,
         np.identity(4),
-        o3d.registration.TransformationEstimationPointToPoint(True),  # with_scaling
-        o3d.registration.ICPConvergenceCriteria(1e-6, max_iter),
+        o3d_registration.TransformationEstimationPointToPoint(True),  # with_scaling
+        o3d_registration.ICPConvergenceCriteria(1e-6, max_iter),
     )
 
     reg.transformation = np.matmul(reg.transformation, init_trans)
@@ -202,16 +207,19 @@ def trajectory_alignment(map_file, est_traj, gt_traj, gt_to_est_transform, rando
         np.asarray([[x, x] for x in range(len(gt_traj.camera_poses))])
     )
 
-    rr = o3d.registration.RANSACConvergenceCriteria()
+    rr = o3d_registration.RANSACConvergenceCriteria()
     rr.max_iteration = 100000
-    rr.max_validation = 100000
+    try:
+        rr.max_validation = 100000
+    except AttributeError:
+        rr.confidence = 0.999
 
-    reg = o3d.registration.registration_ransac_based_on_correspondence(
+    reg = o3d_registration.registration_ransac_based_on_correspondence(
         est_traj_pcd_rand,
         gt_traj_pcd,
         corres,
         0.2,
-        o3d.registration.TransformationEstimationPointToPoint(True),  # with_scaling
+        o3d_registration.TransformationEstimationPointToPoint(True),  # with_scaling
         6,
         rr,
     )

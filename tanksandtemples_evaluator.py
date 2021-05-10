@@ -132,8 +132,11 @@ def uniform_registration(
         print("[Registration] max_size: %d, threshold: %f" % (max_size, threshold))
         o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
 
-    s = uniform_downsample(crop_pcd(source, crop_volume, init_trans), max_points)
-    t = uniform_downsample(crop_pcd(target, crop_volume), max_points)
+    s = crop_pcd(source, crop_volume, init_trans)
+    t = crop_pcd(target, crop_volume)
+
+    s = uniform_downsample(s, max_points)
+    t = uniform_downsample(t, max_points)
 
     reg = o3d_registration.registration_icp(
         s,
@@ -155,8 +158,11 @@ def voxel_registration(
         print("[Registration] voxel_size: %d, threshold: %f" % (voxel_size, threshold))
         o3d.utility.set_verbosity_level(o3d.utility.VerbosityLevel.Debug)
 
-    s = voxel_downsample(crop_pcd(source, crop_volume, init_trans), voxel_size)
-    t = voxel_downsample(crop_pcd(target, crop_volume), voxel_size)
+    s = crop_pcd(source, crop_volume, init_trans)
+    t = crop_pcd(target, crop_volume)
+
+    s = voxel_downsample(s, voxel_size)
+    t = voxel_downsample(t, voxel_size)
 
     reg = o3d_registration.registration_icp(
         s,
@@ -313,16 +319,40 @@ class TanksAndTemplesEvaluator:
         scene_file_base = os.path.join(out_dir_path, scene_name)
         if_verbose_print(scene_file_base + ".precision.ply")
 
+        # print("-------- trans")
+        # print(trans)
+        # print("-------- trans-1")
+        # trans_inv = np.linalg.inv(trans)
+        # print(trans_inv)
+        # print("-------- target")
+        # o3d.visualization.draw_geometries([target])
+        # print("-------- source")
+        # o3d.visualization.draw_geometries([source])
+        # print("--------  trans ( target ) + source")
+        # o3d.visualization.draw_geometries([copy.deepcopy(target).transform(trans), source])
+        # print("-------- trans-1( target ) + source")
+        # o3d.visualization.draw_geometries([copy.deepcopy(target).transform(trans_inv), source])
+        # print("-------- target +  trans ( source )")
+        # o3d.visualization.draw_geometries([target, copy.deepcopy(source).transform(trans)])
+        # print("-------- target + trans-1( source )")
+        # o3d.visualization.draw_geometries([target, copy.deepcopy(source).transform(trans_inv)])
+        # print("--------")
+
         s = copy.deepcopy(source)
-        s.transform(trans)
-        s = crop_volume.crop_point_cloud(s)
+        # s.transform(trans)
+        s.transform(np.linalg.inv(trans))
+        if crop_volume is not None:
+            s = crop_volume.crop_point_cloud(s)
         s = s.voxel_down_sample(voxel_size)
         s.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=20))
 
         t = copy.deepcopy(target)
-        t = crop_volume.crop_point_cloud(t)
+        if crop_volume is not None:
+            t = crop_volume.crop_point_cloud(t)
         t = t.voxel_down_sample(voxel_size)
         t.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=20))
+
+        o3d.visualization.draw_geometries([s, t])
 
         if_verbose_print("[compute_point_cloud_to_point_cloud_distance]")
         distance1 = s.compute_point_cloud_distance(t)
@@ -369,8 +399,16 @@ class TanksAndTemplesEvaluator:
         # Get F-score and histogram
         if_verbose_print("[get_f1_score_histo2]")
 
+        # The precision quantifies the accuracy of the reconstruction: how closely the reconstructed points lie to the ground truth.
+        # Precision alone can be maximized by producing a very sparse set of precisely localized landmarks.
         precision = sum(d < threshold for d in distance1) / len(distance1)
+
+        # The recall quantifies the reconstruction's completeness: to what extent all the ground-truth points are covered.
+        # Recall alone can be maximized by densely covering the space with points.
         recall = sum(d < threshold for d in distance2) / len(distance2)
+
+        # Either of these schemes will drive the other measure and the F-score to 0.
+        # A high F-score for a stringent distance threshold can only be achieved by a reconstruction that is both accurate and complete.
         fscore = 2 * recall * precision / (recall + precision)
 
         bins = np.arange(0, threshold * plot_stretch, threshold / 100)
@@ -415,54 +453,61 @@ class TanksAndTemplesEvaluator:
         est_pcd = o3d.io.read_point_cloud(est_ply_path)  # "source"
         gt_pcd = o3d.io.read_point_cloud(gt_ply_path)  # "target"
 
-        transform = np.loadtxt(align_txt_path)
+        transform = np.loadtxt(align_txt_path)  # gt_traj -> est_traj
         est_traj = Trajectory.read(est_log_path)  # trajectory to register
         gt_traj = Trajectory.read(gt_log_path)
 
         traj_transformation = trajectory_alignment(map_file, est_traj, gt_traj, transform)
 
-        # Refine alignment by using the actual 'gt' and 'est' point clouds
-        # Big point clouds will be downsampled to 'dTau' to speed up alignment
-        vol = o3d.visualization.read_selection_polygon_volume(crop_json_path)
+        if crop_json_path is not None:
+            # Refine alignment by using the actual 'gt' and 'est' point clouds
+            # Big point clouds will be downsampled to 'dTau' to speed up alignment
+            vol = o3d.visualization.read_selection_polygon_volume(crop_json_path)
 
-        # Registration refinement in 3 iterations
-        r2 = voxel_registration(
-            est_pcd,
-            gt_pcd,
-            init_trans=traj_transformation,
-            crop_volume=vol,
-            threshold=dTau * 80,
-            max_iter=20,
-            voxel_size=dTau,
-            verbose=verbose,
-        )
-        r3 = voxel_registration(
-            est_pcd,
-            gt_pcd,
-            init_trans=r2.transformation,
-            crop_volume=vol,
-            threshold=dTau * 20,
-            max_iter=20,
-            voxel_size=dTau / 2,
-            verbose=verbose,
-        )
-        r = uniform_registration(
-            est_pcd,
-            gt_pcd,
-            init_trans=r3.transformation,
-            crop_volume=vol,
-            threshold=2 * dTau,
-            max_iter=20,
-            verbose=verbose,
-        )
+            # Registration refinement in 3 iterations
+            r2 = voxel_registration(
+                est_pcd,
+                gt_pcd,
+                init_trans=traj_transformation,
+                crop_volume=vol,
+                threshold=dTau * 80,
+                max_iter=20,
+                voxel_size=dTau,
+                verbose=verbose,
+            )
+            r3 = voxel_registration(
+                est_pcd,
+                gt_pcd,
+                init_trans=r2.transformation,
+                crop_volume=vol,
+                threshold=dTau * 20,
+                max_iter=20,
+                voxel_size=dTau / 2,
+                verbose=verbose,
+            )
+            r = uniform_registration(
+                est_pcd,
+                gt_pcd,
+                init_trans=r3.transformation,
+                crop_volume=vol,
+                threshold=2 * dTau,
+                max_iter=20,
+                verbose=verbose,
+            )
+            trans = r.transformation
+            crop_volume = vol
+        else:
+            # trans = traj_transformation
+            trans = transform
+            crop_volume = None
 
         # Generate histograms and compute P/R/F1
         # Returns: [precision, recall, fscore, edges_source, cum_source, edges_target, cum_target]
         return TanksAndTemplesEvaluator.evaluate_histogram(
             est_pcd,
             gt_pcd,
-            trans=r.transformation,
-            crop_volume=vol,
+            trans=trans,
+            crop_volume=crop_volume,
             voxel_size=dTau / 2,
             threshold=dTau,
             out_dir_path=out_dir,

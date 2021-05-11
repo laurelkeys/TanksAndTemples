@@ -70,6 +70,9 @@ class Trajectory:
                 np.array_str(self.pose),
             )
 
+    # Trajectory file (.log) format parse reference:
+    # http://redwood-data.org/indoor/fileformat.html
+
     @staticmethod
     def read(log_file_path):
         traj = []
@@ -126,7 +129,7 @@ def uniform_registration(
     if max_size is not None:
         max_points = max_size // 4
     else:
-        max_size, max_points = 16e6, 4e6
+        max_size, max_points = int(16e6), int(4e6)
 
     if verbose:
         print("[Registration] max_size: %d, threshold: %f" % (max_size, threshold))
@@ -139,12 +142,14 @@ def uniform_registration(
     t = uniform_downsample(t, max_points)
 
     reg = o3d_registration.registration_icp(
-        s,
-        t,
-        threshold,
-        np.identity(4),
-        o3d_registration.TransformationEstimationPointToPoint(True),  # with_scaling
-        o3d_registration.ICPConvergenceCriteria(1e-6, max_iter),
+        source=s,
+        target=t,
+        max_correspondence_distance=threshold,
+        init=np.identity(4),
+        estimation_method=o3d_registration.TransformationEstimationPointToPoint(with_scaling=True),
+        criteria=o3d_registration.ICPConvergenceCriteria(
+            relative_fitness=1e-6, relative_rmse=1e-6, max_iteration=max_iter
+        ),
     )
 
     reg.transformation = np.matmul(reg.transformation, init_trans)
@@ -165,19 +170,21 @@ def voxel_registration(
     t = voxel_downsample(t, voxel_size)
 
     reg = o3d_registration.registration_icp(
-        s,
-        t,
-        threshold,
-        np.identity(4),
-        o3d_registration.TransformationEstimationPointToPoint(True),  # with_scaling
-        o3d_registration.ICPConvergenceCriteria(1e-6, max_iter),
+        source=s,
+        target=t,
+        max_correspondence_distance=threshold,
+        init=np.identity(4),
+        estimation_method=o3d_registration.TransformationEstimationPointToPoint(with_scaling=True),
+        criteria=o3d_registration.ICPConvergenceCriteria(
+            relative_fitness=1e-6, relative_rmse=1e-6, max_iteration=max_iter
+        ),
     )
 
     reg.transformation = np.matmul(reg.transformation, init_trans)
     return reg
 
 
-def trajectory_alignment(map_file, est_traj, gt_traj, gt_to_est_transform, randomvar=0):
+def trajectory_alignment(map_file, est_traj, gt_traj, est_to_gt_transform, randomvar=0):
     # if len(est_traj.camera_poses) > 1600 and map_file is not None:
     #     with open(map_file, "r") as f:
     #         n_sampled_frames = int(f.readline())
@@ -197,7 +204,7 @@ def trajectory_alignment(map_file, est_traj, gt_traj, gt_to_est_transform, rando
     est_traj_pcd = est_traj.point_cloud()  # trajectory to register
 
     gt_traj_pcd = gt_traj.point_cloud()
-    gt_traj_pcd.transform(gt_to_est_transform)
+    gt_traj_pcd.transform(est_to_gt_transform)  # XXX
 
     rand_number_added = np.asanyarray(est_traj_pcd.points)
     if randomvar != 0:
@@ -221,13 +228,13 @@ def trajectory_alignment(map_file, est_traj, gt_traj, gt_to_est_transform, rando
         rr.confidence = 0.999
 
     reg = o3d_registration.registration_ransac_based_on_correspondence(
-        est_traj_pcd_rand,
-        gt_traj_pcd,
-        corres,
-        0.2,
-        o3d_registration.TransformationEstimationPointToPoint(True),  # with_scaling
-        6,
-        rr,
+        source=est_traj_pcd_rand,
+        target=gt_traj_pcd,
+        corres=corres,
+        max_correspondence_distance=0.2,
+        estimation_method=o3d_registration.TransformationEstimationPointToPoint(with_scaling=True),
+        ransac_n=6,
+        criteria=rr,
     )
     return reg.transformation
 
@@ -319,40 +326,35 @@ class TanksAndTemplesEvaluator:
         scene_file_base = os.path.join(out_dir_path, scene_name)
         if_verbose_print(scene_file_base + ".precision.ply")
 
-        # print("-------- trans")
-        # print(trans)
-        # print("-------- trans-1")
-        # trans_inv = np.linalg.inv(trans)
-        # print(trans_inv)
-        # print("-------- target")
-        # o3d.visualization.draw_geometries([target])
-        # print("-------- source")
-        # o3d.visualization.draw_geometries([source])
-        # print("--------  trans ( target ) + source")
-        # o3d.visualization.draw_geometries([copy.deepcopy(target).transform(trans), source])
-        # print("-------- trans-1( target ) + source")
-        # o3d.visualization.draw_geometries([copy.deepcopy(target).transform(trans_inv), source])
-        # print("-------- target +  trans ( source )")
-        # o3d.visualization.draw_geometries([target, copy.deepcopy(source).transform(trans)])
-        # print("-------- target + trans-1( source )")
-        # o3d.visualization.draw_geometries([target, copy.deepcopy(source).transform(trans_inv)])
-        # print("--------")
-
         s = copy.deepcopy(source)
-        # s.transform(trans)
-        s.transform(np.linalg.inv(trans))
+        s.transform(trans)  # source -> target
+
+        t = copy.deepcopy(target)
+        # t.transform(np.linalg.inv(trans))  # target -> source
+
+        if crop_volume is not None:
+            orthogonal_axis_index = {"x": 0, "y": 1, "z": 2}[crop_volume.orthogonal_axis.lower()]
+            bounding_polygon = np.asarray(crop_volume.bounding_polygon)
+            min_bound = bounding_polygon.min(axis=0)
+            max_bound = bounding_polygon.max(axis=0)
+            assert min_bound[orthogonal_axis_index] == 0.0
+            assert max_bound[orthogonal_axis_index] == 0.0
+            min_bound[orthogonal_axis_index] = crop_volume.axis_min
+            max_bound[orthogonal_axis_index] = crop_volume.axis_max
+            aabb = o3d.geometry.AxisAlignedBoundingBox(min_bound, max_bound)
+            o3d.visualization.draw_geometries([s, t, aabb])
+        else:
+            o3d.visualization.draw_geometries([s, t])
+
         if crop_volume is not None:
             s = crop_volume.crop_point_cloud(s)
         s = s.voxel_down_sample(voxel_size)
         s.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=20))
 
-        t = copy.deepcopy(target)
         if crop_volume is not None:
             t = crop_volume.crop_point_cloud(t)
         t = t.voxel_down_sample(voxel_size)
         t.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamKNN(knn=20))
-
-        o3d.visualization.draw_geometries([s, t])
 
         if_verbose_print("[compute_point_cloud_to_point_cloud_distance]")
         distance1 = s.compute_point_cloud_distance(t)
@@ -450,63 +452,64 @@ class TanksAndTemplesEvaluator:
         verbose=True,
     ):
         # Load reconstruction and according ground-truth
+        transform = np.loadtxt(align_txt_path)  # "source -> target"
         est_pcd = o3d.io.read_point_cloud(est_ply_path)  # "source"
         gt_pcd = o3d.io.read_point_cloud(gt_ply_path)  # "target"
 
-        transform = np.loadtxt(align_txt_path)  # gt_traj -> est_traj
-        est_traj = Trajectory.read(est_log_path)  # trajectory to register
-        gt_traj = Trajectory.read(gt_log_path)
-
-        traj_transformation = trajectory_alignment(map_file, est_traj, gt_traj, transform)
-
-        if crop_json_path is not None:
+        if any(_ is None for _ in (crop_json_path, gt_log_path, est_log_path)):
+            crop_volume = None
+            source_to_target = transform
+            if verbose:
+                print(f"Skipping refinement (ignored gt_log_path, est_log_path, and crop_json_path")
+        else:
             # Refine alignment by using the actual 'gt' and 'est' point clouds
             # Big point clouds will be downsampled to 'dTau' to speed up alignment
-            vol = o3d.visualization.read_selection_polygon_volume(crop_json_path)
+            crop_volume = o3d.visualization.read_selection_polygon_volume(crop_json_path)
+            assert np.asarray(crop_volume.bounding_polygon).shape == (4, 3)
+
+            est_traj = Trajectory.read(est_log_path)  # trajectory to register
+            gt_traj = Trajectory.read(gt_log_path)
+            trans = trajectory_alignment(map_file, est_traj, gt_traj, transform)
 
             # Registration refinement in 3 iterations
             r2 = voxel_registration(
-                est_pcd,
-                gt_pcd,
-                init_trans=traj_transformation,
-                crop_volume=vol,
+                source=est_pcd,
+                target=gt_pcd,
+                init_trans=trans,
+                crop_volume=crop_volume,
                 threshold=dTau * 80,
                 max_iter=20,
                 voxel_size=dTau,
                 verbose=verbose,
             )
             r3 = voxel_registration(
-                est_pcd,
-                gt_pcd,
+                source=est_pcd,
+                target=gt_pcd,
                 init_trans=r2.transformation,
-                crop_volume=vol,
+                crop_volume=crop_volume,
                 threshold=dTau * 20,
                 max_iter=20,
                 voxel_size=dTau / 2,
                 verbose=verbose,
             )
             r = uniform_registration(
-                est_pcd,
-                gt_pcd,
+                source=est_pcd,
+                target=gt_pcd,
                 init_trans=r3.transformation,
-                crop_volume=vol,
+                crop_volume=crop_volume,
                 threshold=2 * dTau,
                 max_iter=20,
                 verbose=verbose,
             )
-            trans = r.transformation
-            crop_volume = vol
-        else:
-            # trans = traj_transformation
-            trans = transform
-            crop_volume = None
+
+            source_to_target = r.transformation
 
         # Generate histograms and compute P/R/F1
         # Returns: [precision, recall, fscore, edges_source, cum_source, edges_target, cum_target]
         return TanksAndTemplesEvaluator.evaluate_histogram(
             est_pcd,
             gt_pcd,
-            trans=trans,
+            trans=source_to_target,
             crop_volume=crop_volume,
             voxel_size=dTau / 2,
             threshold=dTau,

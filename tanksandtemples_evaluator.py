@@ -109,7 +109,7 @@ def crop_pcd(pcd, crop_volume, trans=None):
     pcd_copy = copy.deepcopy(pcd)
     if trans is not None:
         pcd_copy.transform(trans)
-    return crop_volume.crop_point_cloud(pcd_copy)
+    return pcd_copy if crop_volume is None else crop_volume.crop_point_cloud(pcd_copy)
 
 
 def uniform_downsample(pcd, max_points):
@@ -456,26 +456,26 @@ class TanksAndTemplesEvaluator:
         est_pcd = o3d.io.read_point_cloud(est_ply_path)  # "source"
         gt_pcd = o3d.io.read_point_cloud(gt_ply_path)  # "target"
 
-        if any(_ is None for _ in (crop_json_path, gt_log_path, est_log_path)):
-            crop_volume = None
-            source_to_target = transform
-            if verbose:
-                print(f"Skipping refinement (ignored gt_log_path, est_log_path, and crop_json_path")
-        else:
+        trans = transform
+        crop_volume = None
+
+        if gt_log_path is not None and est_log_path is not None:
             # Refine alignment by using the actual 'gt' and 'est' point clouds
             # Big point clouds will be downsampled to 'dTau' to speed up alignment
-            crop_volume = o3d.visualization.read_selection_polygon_volume(crop_json_path)
-            assert np.asarray(crop_volume.bounding_polygon).shape == (4, 3)
+
+            if crop_json_path is not None:
+                crop_volume = o3d.visualization.read_selection_polygon_volume(crop_json_path)
+                assert np.asarray(crop_volume.bounding_polygon).shape == (4, 3)
 
             est_traj = Trajectory.read(est_log_path)  # trajectory to register
             gt_traj = Trajectory.read(gt_log_path)
-            trans = trajectory_alignment(map_file, est_traj, gt_traj, transform)
+            traj_transform = trajectory_alignment(map_file, est_traj, gt_traj, transform)
 
             # Registration refinement in 3 iterations
             r2 = voxel_registration(
                 source=est_pcd,
                 target=gt_pcd,
-                init_trans=trans,
+                init_trans=traj_transform,
                 crop_volume=crop_volume,
                 threshold=dTau * 80,
                 max_iter=20,
@@ -502,14 +502,14 @@ class TanksAndTemplesEvaluator:
                 verbose=verbose,
             )
 
-            source_to_target = r.transformation
+            trans = r.transformation
 
         # Generate histograms and compute P/R/F1
         # Returns: [precision, recall, fscore, edges_source, cum_source, edges_target, cum_target]
         return TanksAndTemplesEvaluator.evaluate_histogram(
             est_pcd,
             gt_pcd,
-            trans=source_to_target,
+            trans=trans,
             crop_volume=crop_volume,
             voxel_size=dTau / 2,
             threshold=dTau,
